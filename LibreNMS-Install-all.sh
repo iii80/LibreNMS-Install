@@ -33,9 +33,10 @@ fi
 
 # 更新系统并安装依赖
 apt update
-apt install -y curl wget gnupg2 software-properties-common apt-transport-https lsb-release ca-certificates unzip python3-pymysql python3-dotenv python3-setuptools
+apt install -y curl wget gnupg2 software-properties-common apt-transport-https lsb-release ca-certificates unzip \
+    python3-pymysql python3-dotenv python3-setuptools git acl composer net-tools
 
-# 添加 PHP 源（如果系统默认版本不够新）
+# 添加 PHP 源
 PHP_VERSION=8.2
 if [[ "$DISTRO" == "ubuntu" ]]; then
     add-apt-repository ppa:ondrej/php -y
@@ -46,6 +47,10 @@ fi
 apt update
 apt install -y php${PHP_VERSION} php${PHP_VERSION}-cli php${PHP_VERSION}-mysql php${PHP_VERSION}-gd php${PHP_VERSION}-mbstring php${PHP_VERSION}-xml php${PHP_VERSION}-bcmath php${PHP_VERSION}-zip php${PHP_VERSION}-curl php${PHP_VERSION}-snmp php${PHP_VERSION}-intl php${PHP_VERSION}-ldap php${PHP_VERSION}-pgsql php${PHP_VERSION}-fpm
 
+# 设置 PHP 时区
+sed -i "s/^;*date.timezone *=.*/date.timezone = Asia\/Shanghai/" /etc/php/${PHP_VERSION}/fpm/php.ini
+sed -i "s/^;*date.timezone *=.*/date.timezone = Asia\/Shanghai/" /etc/php/${PHP_VERSION}/cli/php.ini
+
 # 安装 MariaDB
 apt install -y mariadb-server
 systemctl enable --now mariadb
@@ -54,12 +59,19 @@ systemctl enable --now mariadb
 apt install -y nginx
 systemctl enable --now nginx
 
-# 创建 LibreNMS 用户和目录
-useradd librenms -d /opt/librenms -M -r -s /bin/bash
+# 创建 librenms 用户
+if ! id librenms >/dev/null 2>&1; then
+    useradd librenms -d /opt/librenms -M -r -s /bin/bash
+else
+    echo "用户 librenms 已存在，跳过创建。"
+fi
+
+# 强制清理并克隆最新版 LibreNMS
+rm -rf /opt/librenms
 cd /opt
 git clone https://github.com/librenms/librenms.git
 chown -R librenms:librenms /opt/librenms
-cd librenms
+cd /opt/librenms
 sudo -u librenms ./scripts/composer_wrapper.php install --no-dev
 
 # 设置权限
@@ -68,14 +80,18 @@ chmod 771 /opt/librenms
 setfacl -d -m g::rwx /opt/librenms
 setfacl -R -m g::rwx /opt/librenms
 
-# 创建数据库
+# 删除并重新创建数据库
 DB_PASS=$(openssl rand -base64 12)
 mysql -u root <<EOF
+DROP DATABASE IF EXISTS librenms;
+DROP USER IF EXISTS 'librenms'@'localhost';
 CREATE DATABASE librenms CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER 'librenms'@'localhost' IDENTIFIED BY '${DB_PASS}';
 GRANT ALL PRIVILEGES ON librenms.* TO 'librenms'@'localhost';
 FLUSH PRIVILEGES;
 EOF
+echo "$DB_PASS" > /opt/librenms/db_password.txt
+chmod 600 /opt/librenms/db_password.txt
 
 # 配置 PHP-FPM
 PHP_FPM_CONF="/etc/php/${PHP_VERSION}/fpm/pool.d/librenms.conf"
@@ -129,12 +145,14 @@ ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/librenms
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 
-# 设置定时任务
+# 安装 cron 与 logrotate 配置（必须克隆完后执行）
 cp /opt/librenms/librenms.nonroot.cron /etc/cron.d/librenms
 cp /opt/librenms/misc/librenms.logrotate /etc/logrotate.d/librenms
 
-# 显示数据库密码
-echo "LibreNMS 安装完成，请访问：http://<服务器IP> 完成网页配置。"
+# 显示完成信息
+IP_ADDR=$(hostname -I | awk '{print $1}')
+echo
+echo "✅ LibreNMS 安装完成，请访问：http://${IP_ADDR} 完成网页配置。"
 echo "数据库信息："
 echo "  数据库名: librenms"
 echo "  用户名: librenms"
