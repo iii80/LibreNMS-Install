@@ -3,6 +3,7 @@
 # Supports Debian, Ubuntu, CentOS, Alpine
 
 set -e
+trap 'echo "发生错误，安装终止。" >&2' ERR
 
 # 检查是否为 root 用户
 if [[ $EUID -ne 0 ]]; then
@@ -19,7 +20,6 @@ else
     echo "无法识别系统类型，退出..."
     exit 1
 fi
-
 echo "系统识别为: $OS"
 
 # 安装前置依赖
@@ -42,26 +42,46 @@ case "$OS" in
         ;;
 esac
 
-# 安装 Docker
-echo ">> 安装 Docker..."
-if [ "$OS" = "alpine" ]; then
-    rc-update add docker boot
-    service docker start
+# 检查 Docker 是否已安装
+if command -v docker &>/dev/null; then
+    echo ">> 已检测到 Docker，跳过安装"
+    docker_installed=true
 else
-    curl -fsSL https://get.docker.com | sh
-    systemctl enable docker
-    systemctl start docker
+    docker_installed=false
 fi
 
-# 安装 docker-compose 二进制（统一方式）
-echo ">> 获取最新 docker-compose 版本..."
-COMPOSE_LATEST=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep tag_name | cut -d '"' -f 4)
-COMPOSE_URL="https://github.com/docker/compose/releases/download/${COMPOSE_LATEST}/docker-compose-$(uname -s)-$(uname -m)"
+# 检查 docker-compose 是否已安装
+if command -v docker-compose &>/dev/null; then
+    echo ">> 已检测到 docker-compose，跳过安装"
+    compose_installed=true
+else
+    compose_installed=false
+fi
 
-echo ">> 安装 docker-compose $COMPOSE_LATEST ..."
-curl -L "$COMPOSE_URL" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
-ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+# 安装 Docker（如未安装）
+if [ "$docker_installed" = false ]; then
+    echo ">> 安装 Docker..."
+    if [ "$OS" = "alpine" ]; then
+        rc-update add docker boot
+        service docker start
+    else
+        curl -fsSL https://get.docker.com | sh
+        systemctl enable docker
+        systemctl start docker
+    fi
+fi
+
+# 安装 docker-compose（如未安装）
+if [ "$compose_installed" = false ]; then
+    echo ">> 获取最新 docker-compose 版本..."
+    COMPOSE_LATEST=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep tag_name | cut -d '"' -f 4)
+    COMPOSE_URL="https://github.com/docker/compose/releases/download/${COMPOSE_LATEST}/docker-compose-$(uname -s)-$(uname -m)"
+
+    echo ">> 安装 docker-compose $COMPOSE_LATEST ..."
+    curl -L "$COMPOSE_URL" -o /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose
+    ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+fi
 
 echo ">> Docker 版本:"
 docker --version
@@ -87,7 +107,7 @@ echo ">> 启动 LibreNMS 容器..."
 docker-compose up -d
 
 # 获取本机 IP 并提示用户访问
-IP=$(hostname -I | awk '{print $1}' 2>/dev/null || ip addr show docker0 | grep "inet " | awk '{print $2}' | cut -d/ -f1)
+IP=$(ip route get 1.1.1.1 | awk '{print $7; exit}')
 echo
 echo ">> LibreNMS 安装完成！"
 echo "请访问: http://$IP:8000 进行初始设置"
