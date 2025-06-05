@@ -34,7 +34,7 @@ fi
 # 更新系统并安装依赖
 apt update
 apt install -y curl wget gnupg2 software-properties-common apt-transport-https lsb-release ca-certificates unzip \
-    python3-pymysql python3-dotenv python3-setuptools git acl composer net-tools
+    python3-pymysql python3-dotenv python3-setuptools python3-pip git acl composer net-tools
 
 # 添加 PHP 源
 PHP_VERSION=8.2
