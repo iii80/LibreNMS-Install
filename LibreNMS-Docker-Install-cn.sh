@@ -62,7 +62,7 @@ else
 
 EOF
 
-    curl -fsSL https://get.docker.com | sh
+    curl -fsSL https://get.docker.com | bash -s docker --mirror Aliyun
     systemctl enable docker
     systemctl start docker
 fi
